@@ -36,7 +36,10 @@ try {
   throw error;
 }
 
-export const db = getFirestore(app);
+const databaseId = (defaultFirebaseConfig as any).firestoreDatabaseId;
+export const db = databaseId 
+  ? getFirestore(app, databaseId) 
+  : getFirestore(app);
 export const auth = getAuth(app);
 
 // Strict Error Handling according to Firebase integration guidelines

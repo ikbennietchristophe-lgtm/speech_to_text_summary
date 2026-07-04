@@ -61,6 +61,7 @@ export default function App() {
   const [selectedRecording, setSelectedRecording] = useState<Recording | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
+  const [mobileTab, setMobileTab] = useState<'record' | 'history'>('record');
 
   // Recording State
   const [isRecording, setIsRecording] = useState(false);
@@ -453,6 +454,7 @@ export default function App() {
       
       // Auto-select the newly added recording
       setSelectedRecording({ id: docRef.id, ...newRecordingDoc } as Recording);
+      setMobileTab('history');
 
     } catch (error: any) {
       console.error('Error processing audio summary:', error);
@@ -681,9 +683,35 @@ export default function App() {
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6" id="app-main">
-        {/* Left Side: Recording Console */}
-        <div className="lg:col-span-5 space-y-6" id="recorder-panel">
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex flex-col gap-6" id="app-main">
+        {/* Mobile Tab Switcher */}
+        <div className="lg:hidden flex p-1 bg-slate-200/60 backdrop-blur-xs rounded-xl border border-slate-200/50" id="mobile-tabs">
+          <button
+            onClick={() => setMobileTab('record')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all ${mobileTab === 'record' ? 'bg-white text-indigo-600 shadow-xs font-semibold' : 'text-slate-600 hover:text-slate-950'}`}
+            id="mobile-tab-record"
+          >
+            <Mic size={15} />
+            <span>{t.newRecording}</span>
+          </button>
+          <button
+            onClick={() => setMobileTab('history')}
+            className={`flex-1 flex items-center justify-center gap-2 py-2.5 text-xs font-bold rounded-lg transition-all relative ${mobileTab === 'history' ? 'bg-white text-indigo-600 shadow-xs font-semibold' : 'text-slate-600 hover:text-slate-950'}`}
+            id="mobile-tab-history"
+          >
+            <Folder size={15} />
+            <span>{lang === 'nl' ? 'Geschiedenis' : 'History'}</span>
+            {recordings.length > 0 && (
+              <span className="px-2 py-0.5 text-[10px] bg-indigo-100 text-indigo-700 rounded-full font-bold" id="mobile-history-badge">
+                {recordings.length}
+              </span>
+            )}
+          </button>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6" id="app-grid">
+          {/* Left Side: Recording Console */}
+          <div className={`lg:col-span-5 space-y-6 ${mobileTab === 'record' ? 'block' : 'hidden lg:block'}`} id="recorder-panel">
           {/* Recorder Console Card */}
           <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-6 relative overflow-hidden" id="recorder-console">
             
@@ -818,7 +846,7 @@ export default function App() {
         </div>
 
         {/* Right Side: Saved Transcripts & Summaries list or details view */}
-        <div className="lg:col-span-7 space-y-6" id="dashboard-panel">
+        <div className={`lg:col-span-7 space-y-6 ${mobileTab === 'history' ? 'block' : 'hidden lg:block'}`} id="dashboard-panel">
           {selectedRecording ? (
             /* Details View of Selected Recording */
             <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-6 space-y-6" id="recording-details-view">
@@ -1041,6 +1069,7 @@ export default function App() {
               </div>
             </div>
           )}
+        </div>
         </div>
       </main>
 
