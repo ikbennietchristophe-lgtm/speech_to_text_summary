@@ -1,9 +1,8 @@
 {
-  "projectId": "folkloric-glass-kgtt6",
-  "appId": "1:147379408250:web:559b69bfc9b489e8731ac3",
-  "apiKey": "AIzaSyCvfoZ7nZFQrj8mpE96EjKiwtcAMJeV50k",
-  "authDomain": "folkloric-glass-kgtt6.firebaseapp.com",
-  "storageBucket": "folkloric-glass-kgtt6.firebasestorage.app",
-  "messagingSenderId": "147379408250",
-  "measurementId": ""
+  "apiKey": "AIzaSyCyV4CTdGOy5M8jbSoGGRmeIe2lkkHRUp4",
+  "authDomain": "myvoicerecordingsummerizer.firebaseapp.com",
+  "projectId": "myvoicerecordingsummerizer",
+  "storageBucket": "myvoicerecordingsummerizer.firebasestorage.app",
+  "messagingSenderId": "252510343632",
+  "appId": "1:252510343632:web:a95bc99b7018d1e0d1e9d5"
 }

@@ -1,0 +1,31 @@
+{
+  "entities": {
+    "recording": {
+      "title": "Recording",
+      "description": "A summarized voice recording with transcript and metadata.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "title": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "duration": { "type": "number" },
+        "audioBase64": { "type": "string" },
+        "transcript": { "type": "string" },
+        "summary": { "type": "string" },
+        "category": { "type": "string" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      },
+      "required": ["id", "userId", "title", "createdAt", "duration", "transcript", "summary", "category"]
+    }
+  },
+  "firestore": {
+    "recordings/{recordingId}": {
+      "schema": "recording",
+      "description": "User voice recording transcripts and summaries."
+    }
+  }
+}

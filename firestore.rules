@@ -1,0 +1,18 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global Safety Net (Default-Deny Catch-All)
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Recordings Collection Guard
+    match /recordings/{recordingId} {
+      // Allow read, update, and delete only if the document belongs to the active user
+      allow read, update, delete: if request.auth != null && resource.data.userId == request.auth.uid;
+      
+      // Allow create only if the newly created document has the active user's UID
+      allow create: if request.auth != null && request.resource.data.userId == request.auth.uid;
+    }
+  }
+}

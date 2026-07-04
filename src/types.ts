@@ -1,20 +1,19 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 export interface Recording {
   id: string;
-  date: string;
-  emailSubject: string;
-  shortTitle: string;
-  description: string;
-  fullText: string;
-  structuredSummary: string;
-  status: 'Active' | 'Archived';
+  userId: string;
+  title: string;
+  createdAt: number; // millisecond timestamp
+  duration: number; // in seconds
+  audioBase64?: string; // base64 representation of audio
+  transcript: string;
+  summary: string;
+  category: string;
+  tags: string[];
 }
 
-export interface SetupDbResponse {
-  spreadsheetId: string;
-  sheetName: string;
+export interface UserProfile {
+  uid: string;
+  email: string;
+  displayName: string;
+  createdAt: number;
 }

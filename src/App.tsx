@@ -1,1201 +1,1052 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
-import { useState, useEffect, useRef } from 'react';
-import { AnimatePresence, motion } from 'motion/react';
+import React, { useState, useEffect, useRef } from 'react';
+import { 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut, 
+  onAuthStateChanged, 
+  User 
+} from 'firebase/auth';
+import { 
+  collection, 
+  addDoc, 
+  deleteDoc, 
+  doc, 
+  query, 
+  where, 
+  orderBy, 
+  onSnapshot 
+} from 'firebase/firestore';
 import { 
   Mic, 
-  MicOff, 
+  Square, 
   Pause, 
   Play, 
-  Save, 
-  Archive, 
   Trash2, 
-  Folder, 
-  FileText, 
-  Mail, 
-  Search, 
-  Plus, 
-  X, 
   LogOut, 
-  CheckCircle, 
-  AlertCircle, 
-  Loader2, 
+  Search, 
+  Tag, 
+  Folder, 
   Calendar, 
-  ChevronRight,
-  Database,
-  Volume2,
-  Edit3
+  Clock, 
+  Copy, 
+  Check, 
+  Sparkles, 
+  Languages, 
+  Volume2, 
+  AlertTriangle 
 } from 'lucide-react';
-import { googleSignIn, initAuth, logout } from './lib/firebase';
+import confetti from 'canvas-confetti';
+import { auth, db, handleFirestoreError, OperationType } from './lib/firebase';
 import { Recording } from './types';
-import ReactMarkdown from 'react-markdown';
 
-// Declare standard browser speech recognition
-const SpeechRecognitionAPI = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-
-const translations = {
-  en: {
-    title: "Speech to Text Summarizer",
-    subtitle: "Record spoken notes, automatically transcribing and formatting them with Gemini, and filing records directly in your Google Drive.",
-    permissionWarning: "Requires permission to store documents in Google Sheets and email summaries on your behalf.",
-    signIn: "Sign in with Google",
-    signingIn: "Signing in...",
-    secureCloud: "Secure Cloud Processing",
-    activeDatabase: "STT Database",
-    signOut: "Sign Out",
-    createNewSummary: "Create New Summary",
-    searchPlaceholder: "Search recordings...",
-    activeConversations: "Active Conversations",
-    archivedFolders: "Archived Folders",
-    refresh: "Refresh",
-    loadingSpreadsheet: "Loading spreadsheet data...",
-    noMatches: "No matches found",
-    noMatchesSub: "Try adjusting your search criteria.",
-    noSummaries: "No summaries yet",
-    noSummariesSub: 'Tap "Create New Summary" to record your first dictation!',
-    archiveEmpty: "Archive is empty",
-    archiveEmptySub: "Summaries you archive will appear here.",
-    archiveConfirm: (title: string) => `Are you sure you want to archive "${title}"?`,
-    deleteConfirm: (title: string) => `Remove "${title}" from your mobile view? (The original data remains safe in Google Sheets)`,
-    recordingsTab: "Recordings",
-    archiveTab: "Archive",
-    recordingActive: "Recording Conversation",
-    recordingPaused: "Recording Paused",
-    speakInstruction: "Start speaking to dictate text...",
-    typeInstruction: "You can also type or paste content directly below if needed.",
-    manualLabel: "Edit/Paste Text Manually (Optional)",
-    manualPlaceholder: "Type or edit your dictation here...",
-    summarizing: "Gemini Summarizing...",
-    saveAndEmail: "Save & Email Summary",
-    convoDetails: "Conversation Details",
-    emailConfirmHeader: "Email Confirmation Status",
-    recipient: "Recipient",
-    subjectLine: "Subject Line",
-    aiSummary: "Structured AI Summary",
-    originalSpeech: "Original Speech Transcription",
-    closeSummary: "Close Summary",
-    archiveRecording: "Archive Recording",
-    welcome: (name: string) => `Welcome, ${name}!`,
-    databaseError: "Error configuring Google Sheet database",
-    fetchError: "Failed to load recordings from Google Sheet",
-    signedOut: "Signed out successfully",
-    micNotSupported: "Web Speech API is not supported in this browser. Please type manually inside the textbox.",
-    micDenied: "Microphone permission denied. Please grant permission or type text manually.",
-    savedSuccess: "Summary successfully saved to Google Sheets and emailed!",
-    updateSuccess: "Summary successfully updated in Google Sheets and emailed!",
-    transcriptionEmpty: "The transcription is empty. Please speak or enter text manually before saving.",
-    dbNotReady: "Database or authorization is not fully initialized. Please wait and try again.",
-    initializingDb: "Initializing database in Google Drive...",
-    confirmSignOut: "Are you sure you want to sign out?",
-    reopenAndRecord: "Re-open & Record more",
-    updateRecording: "Update & Email Summary",
-    updating: "Gemini Updating...",
-  },
-  nl: {
-    title: "Spraak-naar-tekst Samenvatter",
-    subtitle: "Neem gesproken notities op, laat ze automatisch transcriberen en structureren door Gemini, en bewaar ze direct in uw Google Drive.",
-    permissionWarning: "Vereist toestemming om documenten in Google Sheets op te slaan en samenvattingen namens u te e-mailen.",
-    signIn: "Inloggen met Google",
-    signingIn: "Inloggen...",
-    secureCloud: "Beveiligde Cloudverwerking",
-    activeDatabase: "STT Database",
-    signOut: "Uitloggen",
-    createNewSummary: "Nieuwe samenvatting maken",
-    searchPlaceholder: "Zoek opnamen...",
-    activeConversations: "Actieve gesprekken",
-    archivedFolders: "Gearchiveerde mappen",
-    refresh: "Vernieuwen",
-    loadingSpreadsheet: "Spreadsheetgegevens laden...",
-    noMatches: "Geen resultaten gevonden",
-    noMatchesSub: "Probeer uw zoekcriteria aan te passen.",
-    noSummaries: "Nog geen samenvattingen",
-    noSummariesSub: 'Tik op "Nieuwe samenvatting maken" om uw eerste dicteeropname te starten!',
-    archiveEmpty: "Archief is leeg",
-    archiveEmptySub: "Samenvattingen die u archiveert verschijnen hier.",
-    archiveConfirm: (title: string) => `Weet u zeker dat u "${title}" wilt archiveren?`,
-    deleteConfirm: (title: string) => `Wilt u "${title}" verwijderen uit uw mobiele weergave? (De originele gegevens blijven veilig in Google Sheets)`,
-    recordingsTab: "Opnamen",
-    archiveTab: "Archief",
-    recordingActive: "Gesprek opnemen",
-    recordingPaused: "Opname gepauzeerd",
-    speakInstruction: "Begin met spreken om tekst te dicteren...",
-    typeInstruction: "U kunt hieronder ook handmatig tekst typen of plakken.",
-    manualLabel: "Tekst handmatig bewerken/plakken (optioneel)",
-    manualPlaceholder: "Typ of bewerk uw gedicteerde tekst hier...",
-    summarizing: "Gemini vat samen...",
-    saveAndEmail: "Opslaan & E-mail samenvatting",
-    convoDetails: "Gespreksdetails",
-    emailConfirmHeader: "E-mailbevestigingsstatus",
-    recipient: "Ontvanger",
-    subjectLine: "Onderwerpregel",
-    aiSummary: "Gestructureerde AI-samenvatting",
-    originalSpeech: "Originele spraaktranscriptie",
-    closeSummary: "Samenvatting sluiten",
-    archiveRecording: "Opname archiveren",
-    welcome: (name: string) => `Welkom, ${name}!`,
-    databaseError: "Fout bij configureren van Google Sheet database",
-    fetchError: "Laden van opnamen uit Google Sheet mislukt",
-    signedOut: "Succesvol uitgelogd",
-    micNotSupported: "Web Speech API wordt niet ondersteund in deze browser. Typ alstublieft handmatig in het tekstvak.",
-    micDenied: "Microfoontoestemming geweigerd. Verleen toestemming of typ handmatig tekst.",
-    savedSuccess: "Samenvatting succesvol opgeslagen in Google Sheets en gemaild!",
-    updateSuccess: "Samenvatting succesvol bijgewerkt in Google Sheets en gemaild!",
-    transcriptionEmpty: "De transcriptie is leeg. Spreek of voer handmatig tekst in voordat u opslaat.",
-    dbNotReady: "Database of autorisatie is niet volledig geïnitialiseerd. Wacht even en probeer het opnieuw.",
-    initializingDb: "Database initialiseren in Google Drive...",
-    confirmSignOut: "Weet u zeker dat u wilt uitloggen?",
-    reopenAndRecord: "Opnieuw openen & opnemen",
-    updateRecording: "Aanpassing opslaan & E-mailen",
-    updating: "Gemini bijwerken...",
-  }
+// Categories translations
+const CATEGORIES: { [key: string]: { nl: string; en: string; color: string } } = {
+  work: { nl: 'Werk', en: 'Work', color: 'bg-blue-100 text-blue-800 border-blue-200' },
+  personal: { nl: 'Persoonlijk', en: 'Personal', color: 'bg-emerald-100 text-emerald-800 border-emerald-200' },
+  ideas: { nl: 'Ideeën', en: 'Ideas', color: 'bg-amber-100 text-amber-800 border-amber-200' },
+  other: { nl: 'Overig', en: 'Other', color: 'bg-slate-100 text-slate-800 border-slate-200' }
 };
 
 export default function App() {
-  // App language state
-  const [appLang, setAppLang] = useState<'en' | 'nl'>(() => {
-    const saved = localStorage.getItem('app_language');
-    if (saved === 'en' || saved === 'nl') {
-      return saved;
-    }
-    return navigator.language.startsWith('nl') ? 'nl' : 'en';
-  });
+  // Localization state
+  const [lang, setLang] = useState<'nl' | 'en'>('nl');
 
-  const t = translations[appLang];
+  // Auth & Database status
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthLoading, setIsAuthLoading] = useState(true);
+  const [initError, setInitError] = useState<string | null>(null);
 
-  const changeLanguage = (lang: 'en' | 'nl') => {
-    setAppLang(lang);
-    localStorage.setItem('app_language', lang);
-  };
-
-  // Auth state
-  const [needsAuth, setNeedsAuth] = useState(true);
-  const [isLoggingIn, setIsLoggingIn] = useState(false);
-  const [user, setUser] = useState<any>(null);
-  const [token, setToken] = useState<string | null>(null);
-
-  // Database / Sheets config state
-  const [isSettingUpDb, setIsSettingUpDb] = useState(false);
-  const [spreadsheetId, setSpreadsheetId] = useState<string | null>(null);
-  const [sheetName, setSheetName] = useState<string | null>(null);
-
-  // App UI State
-  const [activeTab, setActiveTab] = useState<'recordings' | 'archive'>('recordings');
+  // App Data State
   const [recordings, setRecordings] = useState<Recording[]>([]);
-  const [isLoadingRecordings, setIsLoadingRecordings] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
-  
-  // Deleted items track (only stored in local storage per user's requests)
-  const [deletedIds, setDeletedIds] = useState<string[]>([]);
-
-  // Detailed Modal view state
   const [selectedRecording, setSelectedRecording] = useState<Recording | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState<string>('all');
 
-  // Recording Modal state
-  const [isRecordingModalOpen, setIsRecordingModalOpen] = useState(false);
-  const [isRecordingActive, setIsRecordingActive] = useState(false); // Whether dictation is "on" (dictating/recording)
-  const [fullText, setFullText] = useState(''); // Text accumulated so far
-  const [interimText, setInterimText] = useState(''); // Text currently being dictated
-  const [isSavingRecord, setIsSavingRecord] = useState(false);
-  const [updatingRecording, setUpdatingRecording] = useState<Recording | null>(null);
+  // Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const [isPaused, setIsPaused] = useState(false);
+  const [recordingDuration, setRecordingDuration] = useState(0);
+  const [recordingTitle, setRecordingTitle] = useState('');
+  const [recordingCategory, setRecordingCategory] = useState<string>('work');
 
-  // Status & Notifications state
-  const [statusMessage, setStatusMessage] = useState<{ type: 'success' | 'error' | 'info', text: string } | null>(null);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  // UI Processing States
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingStep, setProcessingStep] = useState<string>('');
+  const [copiedField, setCopiedField] = useState<'transcript' | 'summary' | null>(null);
+  const [errorBanner, setErrorBanner] = useState<string | null>(null);
 
-  // Speech Recognition ref
-  const recognitionRef = useRef<any>(null);
+  // Audio / Media Ref
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
+  const dataArrayRef = useRef<Uint8Array | null>(null);
+  const animationFrameRef = useRef<number | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
 
-  // Load deleted IDs from localStorage on startup
-  useEffect(() => {
-    const savedDeleted = localStorage.getItem('deleted_recording_ids');
-    if (savedDeleted) {
-      try {
-        setDeletedIds(JSON.parse(savedDeleted));
-      } catch (e) {
-        console.error(e);
-      }
+  // Translatable texts
+  const t = {
+    nl: {
+      appName: 'Stemopname Samenvatter',
+      tagline: 'Neem spraak op, transcribeer en vat direct samen met Gemini AI',
+      loadingDb: 'Database of autorisatie is niet volledig geïnitialiseerd. Wacht even en probeer het opnieuw.',
+      loginTitle: 'Welkom bij Voice Recording Summarizer',
+      loginSubtitle: 'Log in met uw Google-account om veilige stemopnames te maken, te transcriberen en direct samen te vatten met AI.',
+      loginButton: 'Log in met Google',
+      signOut: 'Uitloggen',
+      newRecording: 'Nieuwe Opname',
+      recordTitlePlaceholder: 'Geef uw opname een titel...',
+      startRecord: 'Start Opname',
+      stopRecord: 'Stop Opname',
+      pauseRecord: 'Pauzeer',
+      resumeRecord: 'Hervat',
+      recordingActive: 'Bezig met opnemen...',
+      recordingPaused: 'Opname gepauzeerd',
+      duration: 'Duur',
+      category: 'Categorie',
+      selectCategory: 'Selecteer categorie',
+      allCategories: 'Alle Categorieën',
+      searchPlaceholder: 'Zoeken in opnames...',
+      noRecordings: 'Nog geen opnames gevonden. Begin met uw eerste opname hierboven!',
+      noSearchResults: 'Geen opnames gevonden voor uw zoekopdracht.',
+      processing: 'AI is bezig met verwerken...',
+      stepUpload: 'Audio uploaden naar de server...',
+      stepTranscribe: 'Spraak analyseren en transcriberen...',
+      stepSummarize: 'Hoofdpunten en samenvatting genereren...',
+      transcriptTab: 'Transcriptie',
+      summaryTab: 'AI Samenvatting',
+      copyTranscript: 'Kopieer transcriptie',
+      copySummary: 'Kopieer samenvatting',
+      copied: 'Gekopieerd!',
+      deleteRecording: 'Verwijder opname',
+      deleteConfirm: 'Weet u zeker dat u deze opname wilt verwijderen?',
+      backToList: 'Terug naar lijst',
+      errorRecording: 'Kon geen opname starten. Controleer uw microfoonrechten.',
+      errorProcessing: 'Er is een fout opgetreden bij het verwerken van de audio.',
+      errorFirebase: 'Fout bij synchroniseren met database.',
+      all: 'Alle',
+      tagsLabel: 'Labels',
+      createdAtLabel: 'Gemaakt op'
+    },
+    en: {
+      appName: 'Voice Recording Summarizer',
+      tagline: 'Record, transcribe, and summarize your voice notes with Gemini AI',
+      loadingDb: 'Database or authentication is not fully initialized. Please wait a moment and try again.',
+      loginTitle: 'Welcome to Voice Recording Summarizer',
+      loginSubtitle: 'Sign in with Google to securely record audio, transcribe speech, and get AI-powered structured summaries.',
+      loginButton: 'Sign in with Google',
+      signOut: 'Sign Out',
+      newRecording: 'New Recording',
+      recordTitlePlaceholder: 'Give your recording a title...',
+      startRecord: 'Start Recording',
+      stopRecord: 'Stop Recording',
+      pauseRecord: 'Pause',
+      resumeRecord: 'Resume',
+      recordingActive: 'Recording audio...',
+      recordingPaused: 'Recording paused',
+      duration: 'Duration',
+      category: 'Category',
+      selectCategory: 'Select category',
+      allCategories: 'All Categories',
+      searchPlaceholder: 'Search recordings...',
+      noRecordings: 'No recordings found. Start by making your first recording above!',
+      noSearchResults: 'No recordings found matching your search.',
+      processing: 'AI is processing...',
+      stepUpload: 'Uploading audio chunks...',
+      stepTranscribe: 'Transcribing speech to text...',
+      stepSummarize: 'Extracting key summary points...',
+      transcriptTab: 'Transcription',
+      summaryTab: 'AI Summary',
+      copyTranscript: 'Copy transcription',
+      copySummary: 'Copy summary',
+      copied: 'Copied!',
+      deleteRecording: 'Delete recording',
+      deleteConfirm: 'Are you sure you want to delete this recording?',
+      backToList: 'Back to list',
+      errorRecording: 'Could not start recording. Please check microphone permissions.',
+      errorProcessing: 'An error occurred while analyzing the audio.',
+      errorFirebase: 'Database sync failure occurred.',
+      all: 'All',
+      tagsLabel: 'Tags',
+      createdAtLabel: 'Created on'
     }
-  }, []);
+  }[lang];
 
-  // Initialize Auth state listener
+  // Auth Observer
   useEffect(() => {
-    const unsubscribe = initAuth(
-      (currentUser, accessToken) => {
+    try {
+      const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
         setUser(currentUser);
-        setToken(accessToken);
-        setNeedsAuth(false);
-        // Automatically set up or retrieve the database sheet
-        setupDatabase(accessToken);
-      },
-      () => {
-        setNeedsAuth(true);
-        setUser(null);
-        setToken(null);
-      }
-    );
-    return () => unsubscribe();
+        setIsAuthLoading(false);
+      }, (error) => {
+        console.error('Firebase Auth state error:', error);
+        setInitError(error.message);
+        setIsAuthLoading(false);
+      });
+      return () => unsubscribe();
+    } catch (e: any) {
+      console.error('Error starting auth listener:', e);
+      setInitError(e.message || 'Firebase Auth is failed to load.');
+      setIsAuthLoading(false);
+    }
   }, []);
 
-  // Show status notification temporarily
-  const showStatus = (text: string, type: 'success' | 'error' | 'info' = 'success') => {
-    setStatusMessage({ text, type });
-    setTimeout(() => {
-      setStatusMessage(null);
-    }, 5000);
-  };
-
-  // Set up Google Drive Folder and Google Sheet Database
-  const setupDatabase = async (accessToken: string) => {
-    setIsSettingUpDb(true);
-    try {
-      const res = await fetch('/api/setup-db', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        }
-      });
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to setup database');
-      }
-      const data = await res.json();
-      setSpreadsheetId(data.spreadsheetId);
-      setSheetName(data.sheetName);
-      
-      // Load previous recordings
-      fetchRecordings(accessToken, data.spreadsheetId, data.sheetName);
-    } catch (err: any) {
-      console.error(err);
-      showStatus(err.message || t.databaseError, 'error');
-    } finally {
-      setIsSettingUpDb(false);
-    }
-  };
-
-  // Fetch recordings from Sheets
-  const fetchRecordings = async (authToken: string, sheetId: string, name: string) => {
-    setIsLoadingRecordings(true);
-    try {
-      const res = await fetch('/api/recordings', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${authToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({ spreadsheetId: sheetId, sheetName: name })
-      });
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to fetch recordings');
-      }
-      const data = await res.json();
-      setRecordings(data.recordings || []);
-    } catch (err: any) {
-      console.error(err);
-      showStatus(err.message || t.fetchError, 'error');
-    } finally {
-      setIsLoadingRecordings(false);
-    }
-  };
-
-  // Handle Google Login
-  const handleLogin = async () => {
-    setIsLoggingIn(true);
-    setErrorMsg(null);
-    try {
-      const result = await googleSignIn();
-      if (result) {
-        setUser(result.user);
-        setToken(result.accessToken);
-        setNeedsAuth(false);
-        showStatus(t.welcome(result.user.displayName || 'User'));
-        await setupDatabase(result.accessToken);
-      }
-    } catch (err: any) {
-      console.error('Login failed:', err);
-      setErrorMsg(err.message || 'Google Authentication failed. Please try again.');
-    } finally {
-      setIsLoggingIn(false);
-    }
-  };
-
-  // Handle Logout
-  const handleLogout = async () => {
-    if (window.confirm(t.confirmSignOut)) {
-      await logout();
-      setUser(null);
-      setToken(null);
-      setNeedsAuth(true);
-      setRecordings([]);
-      setSpreadsheetId(null);
-      setSheetName(null);
-      showStatus(t.signedOut, 'info');
-    }
-  };
-
-  // Speech-to-Text Speech Recognition Management
+  // Fetch recordings from Firestore
   useEffect(() => {
-    if (!isRecordingActive) {
+    if (!user) {
+      setRecordings([]);
       return;
     }
 
-    if (!SpeechRecognitionAPI) {
-      showStatus(t.micNotSupported, 'info');
-      return;
+    const q = query(
+      collection(db, 'recordings'),
+      where('userId', '==', user.uid),
+      orderBy('createdAt', 'desc')
+    );
+
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      const fetched: Recording[] = [];
+      snapshot.forEach((doc) => {
+        fetched.push({ id: doc.id, ...doc.data() } as Recording);
+      });
+      setRecordings(fetched);
+    }, (error) => {
+      console.error('Firestore snapshot read error:', error);
+      setErrorBanner(t.errorFirebase + ': ' + error.message);
+    });
+
+    return () => unsubscribe();
+  }, [user, lang]);
+
+  // Audio Duration Timer
+  useEffect(() => {
+    if (isRecording && !isPaused) {
+      timerRef.current = setInterval(() => {
+        setRecordingDuration((prev) => prev + 1);
+      }, 1000);
+    } else {
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
+        timerRef.current = null;
+      }
     }
-
-    // Initialize speech recognition
-    const recognition = new SpeechRecognitionAPI();
-    recognition.continuous = true;
-    recognition.interimResults = true;
-    recognition.lang = appLang === 'nl' ? 'nl-NL' : 'en-US'; // Dynamically match dictation language
-
-    recognition.onresult = (event: any) => {
-      let interim = '';
-      let final = '';
-
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        if (event.results[i].isFinal) {
-          final += event.results[i][0].transcript + ' ';
-        } else {
-          interim += event.results[i][0].transcript;
-        }
-      }
-
-      if (final) {
-        setFullText(prev => prev + final);
-      }
-      setInterimText(interim);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error:', event.error);
-      if (event.error === 'not-allowed') {
-        showStatus(t.micDenied, 'error');
-        setIsRecordingActive(false);
-      }
-    };
-
-    let isComponentActive = true;
-
-    recognition.onend = () => {
-      if (isComponentActive) {
-        // Safe delayed restart for continuous recording upon natural timeouts
-        setTimeout(() => {
-          try {
-            if (isComponentActive) {
-              recognition.start();
-            }
-          } catch (e) {
-            console.error('Restart error:', e);
-          }
-        }, 200);
-      }
-    };
-
-    recognitionRef.current = recognition;
-
-    // Small delay before starting a new recognition session to let previous locks completely release
-    const startTimer = setTimeout(() => {
-      try {
-        if (isComponentActive) {
-          recognition.start();
-        }
-      } catch (e) {
-        console.error('Start error:', e);
-      }
-    }, 250);
 
     return () => {
-      isComponentActive = false;
-      clearTimeout(startTimer);
-      if (recognitionRef.current === recognition) {
-        recognitionRef.current = null;
-      }
-      try {
-        recognition.onend = null; // Detach event before stopping to prevent loop
-        recognition.stop();
-      } catch (e) {
-        console.error('Stop error during cleanup:', e);
+      if (timerRef.current) {
+        clearInterval(timerRef.current);
       }
     };
-  }, [isRecordingActive, appLang]);
+  }, [isRecording, isPaused]);
 
-  // Toggle dictation
-  const handleToggleRecording = () => {
-    if (isRecordingActive) {
-      // If pausing, merge any existing interim/unfinalized text safely
-      if (interimText.trim()) {
-        setFullText(prev => (prev + ' ' + interimText).trim() + ' ');
-        setInterimText('');
+  // Canvas waveform renderer
+  const drawWaveform = () => {
+    if (!analyserRef.current || !canvasRef.current || !dataArrayRef.current) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvas.width;
+    const height = canvas.height;
+    const analyser = analyserRef.current;
+    const dataArray = dataArrayRef.current;
+
+    analyser.getByteFrequencyData(dataArray as any);
+
+    ctx.clearRect(0, 0, width, height);
+
+    // Render beautiful audio level pulsing visualizer
+    let sum = 0;
+    for (let i = 0; i < dataArray.length; i++) {
+      sum += dataArray[i];
+    }
+    const average = sum / dataArray.length;
+    const pulseRadius = Math.min(height / 2, 20 + (average / 255) * (height / 2));
+
+    // Dynamic gradient
+    const gradient = ctx.createRadialGradient(
+      width / 2, height / 2, 5,
+      width / 2, height / 2, pulseRadius
+    );
+    gradient.addColorStop(0, 'rgba(99, 102, 241, 0.7)'); // Indigo-500
+    gradient.addColorStop(0.5, 'rgba(168, 85, 247, 0.4)'); // Purple-500
+    gradient.addColorStop(1, 'rgba(236, 72, 153, 0)'); // Pink-500
+
+    ctx.beginPath();
+    ctx.arc(width / 2, height / 2, pulseRadius, 0, 2 * Math.PI);
+    ctx.fillStyle = gradient;
+    ctx.fill();
+
+    // Draw secondary rings
+    ctx.beginPath();
+    ctx.arc(width / 2, height / 2, pulseRadius * 0.7, 0, 2 * Math.PI);
+    ctx.strokeStyle = 'rgba(99, 102, 241, 0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+
+    animationFrameRef.current = requestAnimationFrame(drawWaveform);
+  };
+
+  // Start Voice Recording
+  const startRecording = async () => {
+    setErrorBanner(null);
+    audioChunksRef.current = [];
+    setRecordingDuration(0);
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      
+      // Setup Web Audio API Analyser for real-time level monitoring
+      const audioCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioCtx.createMediaStreamSource(stream);
+      const analyser = audioCtx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+
+      const bufferLength = analyser.frequencyBinCount;
+      const dataArray = new Uint8Array(bufferLength);
+
+      audioContextRef.current = audioCtx;
+      analyserRef.current = analyser;
+      dataArrayRef.current = dataArray;
+
+      // Start WebM / WAV audio capture
+      let options = { mimeType: 'audio/webm' };
+      if (!MediaRecorder.isTypeSupported('audio/webm')) {
+        options = { mimeType: 'audio/ogg' };
+      }
+      if (!MediaRecorder.isTypeSupported('audio/ogg')) {
+        options = { mimeType: '' }; // Fallback to browser default
+      }
+
+      const mediaRecorder = new MediaRecorder(stream, options);
+      mediaRecorderRef.current = mediaRecorder;
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data && event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        // Cleanup active stream tracks
+        stream.getTracks().forEach(track => track.stop());
+        if (audioCtx.state !== 'closed') {
+          audioCtx.close();
+        }
+        await processAndSummarizeAudio();
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setIsPaused(false);
+
+      // Trigger visualizer animation loop
+      setTimeout(() => {
+        drawWaveform();
+      }, 100);
+
+    } catch (error: any) {
+      console.error('Failed to access microphone:', error);
+      setErrorBanner(t.errorRecording);
+    }
+  };
+
+  // Stop Recording
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+      setIsPaused(false);
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
       }
     }
-    setIsRecordingActive(!isRecordingActive);
   };
 
-  // Open Recording modal
-  const openNewSummaryModal = () => {
-    setUpdatingRecording(null);
-    setFullText('');
-    setInterimText('');
-    setIsRecordingActive(true);
-    setIsRecordingModalOpen(true);
-  };
-
-  // Re-open an existing active recording to edit/add info
-  const handleReopenRecording = (recording: Recording) => {
-    setUpdatingRecording(recording);
-    setFullText(recording.fullText);
-    setInterimText('');
-    setIsRecordingActive(false); // Initially paused so they can review, then record
-    setIsRecordingModalOpen(true);
-  };
-
-  // Save the full transcribed recording, summarize it with Gemini and email
-  const handleSaveRecording = async () => {
-    // Combine full text and any pending interim text
-    const finalCompiledText = (fullText + ' ' + interimText).trim();
-    if (!finalCompiledText) {
-      alert(t.transcriptionEmpty);
-      return;
+  // Pause / Resume Recording
+  const togglePause = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      if (isPaused) {
+        mediaRecorderRef.current.resume();
+        setIsPaused(false);
+      } else {
+        mediaRecorderRef.current.pause();
+        setIsPaused(true);
+      }
     }
+  };
 
-    if (!token || !spreadsheetId || !sheetName) {
-      alert(t.dbNotReady);
-      return;
-    }
+  // Convert blob to Base64
+  const blobToBase64 = (blob: Blob): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onloadend = () => {
+        const base64String = (reader.result as string).split(',')[1];
+        resolve(base64String);
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  };
 
-    setIsRecordingActive(false);
-    setIsSavingRecord(true);
+  // Send to AI API & Save Result
+  const processAndSummarizeAudio = async () => {
+    if (audioChunksRef.current.length === 0) return;
+
+    setIsProcessing(true);
+    setProcessingStep(t.stepUpload);
+
     try {
-      const endpoint = updatingRecording ? '/api/recordings/update' : '/api/recordings/create';
-      const bodyPayload = updatingRecording 
-        ? { spreadsheetId, sheetName, id: updatingRecording.id, fullText: finalCompiledText, language: appLang }
-        : { spreadsheetId, sheetName, fullText: finalCompiledText, language: appLang };
+      const audioBlob = new Blob(audioChunksRef.current, { type: mediaRecorderRef.current?.mimeType || 'audio/webm' });
+      const audioBase64 = await blobToBase64(audioBlob);
 
-      const res = await fetch(endpoint, {
+      setProcessingStep(t.stepTranscribe);
+      
+      // Express full-stack endpoint
+      const response = await fetch('/api/summarize', {
         method: 'POST',
         headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
+          'Content-Type': 'application/json',
         },
-        body: JSON.stringify(bodyPayload)
+        body: JSON.stringify({
+          audioBase64,
+          mimeType: audioBlob.type,
+          language: lang,
+        }),
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
+      if (!response.ok) {
+        const errData = await response.json();
         throw new Error(errData.error || 'Server processing failed');
       }
 
-      const data = await res.json();
-      showStatus(updatingRecording ? t.updateSuccess : t.savedSuccess, 'success');
-      
-      if (updatingRecording) {
-        // Update recording in the list
-        setRecordings(prev => prev.map(rec => rec.id === updatingRecording.id ? data.recording : rec));
-      } else {
-        // Prepend to local recording list so it shows immediately
-        setRecordings(prev => [data.recording, ...prev]);
-      }
-      
-      // Close modal
-      setIsRecordingModalOpen(false);
-      setUpdatingRecording(null);
-    } catch (err: any) {
-      console.error(err);
-      alert(`Error processing summary: ${err.message || 'Please check server environment variables.'}`);
-    } finally {
-      setIsSavingRecord(false);
-    }
-  };
+      setProcessingStep(t.stepSummarize);
+      const aiResult = await response.json();
 
-  // Archive a recording in Google Sheets
-  const handleArchiveRecording = async (e: React.MouseEvent, recording: Recording) => {
-    e.stopPropagation(); // Avoid opening the details modal
-    if (!token || !spreadsheetId || !sheetName) return;
+      // Clean default title
+      const finalTitle = recordingTitle.trim() || `${t.newRecording} - ${new Date().toLocaleDateString(lang === 'nl' ? 'nl-NL' : 'en-US')}`;
 
-    if (!window.confirm(t.archiveConfirm(recording.shortTitle))) {
-      return;
-    }
+      // Save into firestore under User's UID
+      const newRecordingDoc = {
+        userId: user!.uid,
+        title: finalTitle,
+        createdAt: Date.now(),
+        duration: recordingDuration,
+        transcript: aiResult.transcript || 'Geen transcriptie beschikbaar.',
+        summary: aiResult.summary || 'Geen samenvatting gegenereerd.',
+        category: recordingCategory,
+        tags: [recordingCategory, lang]
+      };
 
-    try {
-      const res = await fetch('/api/recordings/archive', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          spreadsheetId,
-          sheetName,
-          id: recording.id
-        })
+      const docRef = await addDoc(collection(db, 'recordings'), newRecordingDoc);
+
+      // Trigger Confetti!
+      confetti({
+        particleCount: 100,
+        spread: 70,
+        origin: { y: 0.6 }
       });
 
-      if (!res.ok) {
-        const errData = await res.json();
-        throw new Error(errData.error || 'Failed to archive item');
+      // Clear input fields
+      setRecordingTitle('');
+      
+      // Auto-select the newly added recording
+      setSelectedRecording({ id: docRef.id, ...newRecordingDoc } as Recording);
+
+    } catch (error: any) {
+      console.error('Error processing audio summary:', error);
+      setErrorBanner(t.errorProcessing + ': ' + error.message);
+    } finally {
+      setIsProcessing(false);
+      setProcessingStep('');
+    }
+  };
+
+  // Delete recording from Firestore
+  const handleDelete = async (recId: string) => {
+    if (!confirm(t.deleteConfirm)) return;
+    try {
+      await deleteDoc(doc(db, 'recordings', recId));
+      if (selectedRecording?.id === recId) {
+        setSelectedRecording(null);
       }
-
-      showStatus(appLang === 'nl' ? `"${recording.shortTitle}" is gearchiveerd!` : `"${recording.shortTitle}" has been archived!`);
-      // Update local recording status
-      setRecordings(prev => prev.map(rec => rec.id === recording.id ? { ...rec, status: 'Archived' } : rec));
-    } catch (err: any) {
-      console.error(err);
-      showStatus(err.message || 'Error archiving recording', 'error');
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `recordings/${recId}`);
     }
   };
 
-  // Delete an archived summary ONLY from local app state/view (Google Sheet remains untouched)
-  const handleDeleteArchived = (e: React.MouseEvent, recordingId: string, title: string) => {
-    e.stopPropagation(); // Avoid opening the details modal
-    if (!window.confirm(t.deleteConfirm(title))) {
-      return;
-    }
-
-    const updatedDeleted = [...deletedIds, recordingId];
-    setDeletedIds(updatedDeleted);
-    localStorage.setItem('deleted_recording_ids', JSON.stringify(updatedDeleted));
-    showStatus(appLang === 'nl' ? 'Verwijderd uit archiefweergave' : 'Removed from archive view', 'success');
+  // Copy field utility
+  const handleCopy = (text: string, field: 'transcript' | 'summary') => {
+    navigator.clipboard.writeText(text);
+    setCopiedField(field);
+    setTimeout(() => setCopiedField(null), 2000);
   };
 
-  // Filter and compute active vs archived items (excluding locally deleted IDs)
-  const visibleRecordings = recordings.filter(rec => !deletedIds.includes(rec.id));
-  
-  const activeRecordings = visibleRecordings.filter(rec => rec.status === 'Active');
-  const archivedRecordings = visibleRecordings.filter(rec => rec.status === 'Archived');
+  // Google Sign-In helper
+  const handleLogin = async () => {
+    setErrorBanner(null);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      console.error('Google login failed:', error);
+      setErrorBanner(error.message);
+    }
+  };
 
-  const filteredRecordings = (activeTab === 'recordings' ? activeRecordings : archivedRecordings).filter(rec => {
-    const query = searchQuery.toLowerCase();
+  // Logout helper
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setSelectedRecording(null);
+    } catch (error) {
+      console.error('Sign-out failed:', error);
+    }
+  };
+
+  // Format Duration string
+  const formatTime = (secs: number) => {
+    const m = Math.floor(secs / 60).toString().padStart(2, '0');
+    const s = (secs % 60).toString().padStart(2, '0');
+    return `${m}:${s}`;
+  };
+
+  // Render auth/initialization loading screen
+  if (isAuthLoading) {
     return (
-      rec.shortTitle.toLowerCase().includes(query) ||
-      rec.description.toLowerCase().includes(query) ||
-      rec.emailSubject.toLowerCase().includes(query) ||
-      rec.fullText.toLowerCase().includes(query)
+      <div className="flex flex-col items-center justify-center min-h-screen bg-slate-50 text-slate-600 p-6" id="loading-container">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-indigo-600 mb-4" id="loading-spinner"></div>
+        <p className="text-center font-medium max-w-md text-slate-700" id="loading-text">
+          {t.loadingDb}
+        </p>
+      </div>
     );
+  }
+
+  // Render sign-in page if not authenticated
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex flex-col justify-between py-12 px-4 sm:px-6 lg:px-8" id="login-layout">
+        <div className="sm:mx-auto sm:w-full sm:max-w-md" id="login-header">
+          {/* Language Switch */}
+          <div className="flex justify-end mb-8" id="login-lang-switch">
+            <button 
+              onClick={() => setLang(lang === 'nl' ? 'en' : 'nl')}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-700 bg-white border border-slate-200 rounded-full hover:bg-slate-50 shadow-xs transition"
+              id="toggle-lang-btn"
+            >
+              <Languages size={14} id="lang-icon" />
+              <span>{lang === 'nl' ? 'English' : 'Nederlands'}</span>
+            </button>
+          </div>
+
+          <div className="text-center" id="logo-branding">
+            <div className="inline-flex items-center justify-center p-3.5 bg-indigo-600 text-white rounded-2xl shadow-md shadow-indigo-100 mb-6" id="brand-badge">
+              <Mic size={32} id="brand-icon" />
+            </div>
+            <h1 className="text-3xl font-extrabold text-slate-900 tracking-tight" id="login-title">
+              {lang === 'nl' ? 'Stemopname Samenvatter' : 'Voice Recording Summarizer'}
+            </h1>
+            <p className="mt-2 text-sm text-slate-500" id="login-subtitle">
+              {lang === 'nl' ? 'Gepersonaliseerde AI-transcripts & samenvattingen' : 'Personalized AI transcripts & summaries'}
+            </p>
+          </div>
+        </div>
+
+        <div className="mt-8 sm:mx-auto sm:w-full sm:max-w-md" id="login-card-container">
+          <div className="bg-white py-10 px-8 shadow-sm border border-slate-200/80 rounded-2xl space-y-6" id="login-card">
+            <p className="text-sm text-slate-600 text-center leading-relaxed" id="login-desc">
+              {t.loginSubtitle}
+            </p>
+
+            {errorBanner && (
+              <div className="p-4 bg-rose-50 border border-rose-100 rounded-xl flex items-start gap-3 text-rose-700 text-xs" id="login-error">
+                <AlertTriangle size={16} className="shrink-0 mt-0.5" id="error-alert-icon" />
+                <span id="error-alert-text">{errorBanner}</span>
+              </div>
+            )}
+
+            <button
+              onClick={handleLogin}
+              className="w-full flex justify-center items-center gap-3 px-5 py-3.5 border border-slate-200 bg-white text-slate-700 font-semibold rounded-xl hover:bg-slate-50 hover:border-slate-300 shadow-xs active:scale-[0.99] transition"
+              id="google-signin-button"
+            >
+              {/* Google G Logo SVG */}
+              <svg className="h-5 w-5" viewBox="0 0 24 24" id="google-svg">
+                <path
+                  fill="#4285F4"
+                  d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"
+                />
+                <path
+                  fill="#34A853"
+                  d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"
+                />
+                <path
+                  fill="#FBBC05"
+                  d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z"
+                />
+                <path
+                  fill="#EA4335"
+                  d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"
+                />
+              </svg>
+              <span>{t.loginButton}</span>
+            </button>
+          </div>
+        </div>
+
+        <div className="text-center text-xs text-slate-400" id="login-footer">
+          &copy; {new Date().getFullYear()} Voice Recording Summarizer. All rights reserved.
+        </div>
+      </div>
+    );
+  }
+
+  // Filtered recordings
+  const filteredRecordings = recordings.filter(rec => {
+    const matchesSearch = rec.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
+                          rec.transcript.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          rec.summary.toLowerCase().includes(searchQuery.toLowerCase());
+    const matchesCategory = selectedCategory === 'all' || rec.category === selectedCategory;
+    return matchesSearch && matchesCategory;
   });
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-800 flex flex-col items-center justify-start antialiased selection:bg-emerald-100 font-sans">
-      
-      {/* Status toast notifications */}
-      <AnimatePresence>
-        {statusMessage && (
-          <motion.div 
-            initial={{ opacity: 0, y: -50, scale: 0.9 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -20, scale: 0.9 }}
-            className={`fixed top-4 z-50 px-4 py-3 rounded-xl shadow-lg flex items-center gap-2.5 text-sm font-medium border ${
-              statusMessage.type === 'error' 
-                ? 'bg-rose-50 text-rose-800 border-rose-100' 
-                : statusMessage.type === 'info'
-                ? 'bg-blue-50 text-blue-800 border-blue-100'
-                : 'bg-emerald-50 text-emerald-800 border-emerald-100'
-            }`}
+    <div className="min-h-screen bg-slate-50 flex flex-col" id="app-layout">
+      {/* Dynamic Error Alerts */}
+      {errorBanner && (
+        <div className="bg-rose-600 text-white px-4 py-3 text-sm font-medium flex items-center justify-between shadow-md" id="error-toast">
+          <div className="flex items-center gap-2" id="error-toast-body">
+            <AlertTriangle size={18} id="toast-error-icon" />
+            <span id="toast-error-text">{errorBanner}</span>
+          </div>
+          <button 
+            onClick={() => setErrorBanner(null)}
+            className="text-white hover:text-rose-100 font-bold px-2 py-0.5 rounded-lg text-xs"
+            id="toast-close-btn"
           >
-            {statusMessage.type === 'error' ? (
-              <AlertCircle className="w-4 h-4 text-rose-600 shrink-0" />
-            ) : (
-              <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
-            )}
-            <span>{statusMessage.text}</span>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            ✕
+          </button>
+        </div>
+      )}
 
-      {/* LOGIN VIEW */}
-      {needsAuth ? (
-        <div className="w-full max-w-md min-h-screen flex flex-col justify-between px-6 py-12 bg-white shadow-2xl relative overflow-hidden">
-          {/* Ambient header glow */}
-          <div className="absolute top-0 left-0 right-0 h-40 bg-gradient-to-b from-emerald-50/50 to-transparent pointer-events-none" />
-          
-          {/* Language Selector Pill in Login page */}
-          <div className="absolute top-4 right-4 z-20 flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/50">
-            <button
-              onClick={() => changeLanguage('en')}
-              className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${
-                appLang === 'en' 
-                  ? 'bg-white text-slate-900 shadow-xs' 
-                  : 'text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              EN
-            </button>
-            <button
-              onClick={() => changeLanguage('nl')}
-              className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${
-                appLang === 'nl' 
-                  ? 'bg-white text-slate-900 shadow-xs' 
-                  : 'text-slate-400 hover:text-slate-600'
-              }`}
-            >
-              NL
-            </button>
-          </div>
-
-          <div className="flex flex-col items-center text-center pt-8 z-10">
-            <div className="w-16 h-16 rounded-2xl bg-emerald-500 flex items-center justify-center shadow-md shadow-emerald-500/10 mb-6">
-              <Mic className="w-8 h-8 text-white" />
+      {/* Main Studio Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-10 shadow-xs" id="app-header">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between" id="header-content">
+          <div className="flex items-center gap-3" id="header-brand">
+            <div className="p-2 bg-indigo-600 text-white rounded-xl shadow-xs" id="header-brand-badge">
+              <Mic size={20} id="header-brand-icon" />
             </div>
-            
-            <h1 className="text-2xl font-extrabold tracking-tight text-slate-900">
-              {t.title}
-            </h1>
-            <p className="mt-2.5 text-slate-500 text-sm max-w-xs leading-relaxed">
-              {t.subtitle}
-            </p>
+            <div>
+              <h1 className="font-bold text-slate-900 text-lg leading-tight" id="header-title">{t.appName}</h1>
+              <p className="text-slate-400 text-[10px] hidden sm:block" id="header-subtitle">{t.tagline}</p>
+            </div>
           </div>
 
-          <div className="flex flex-col items-center w-full z-10 my-8">
-            {errorMsg && (
-              <div className="mb-6 p-4 rounded-xl bg-rose-50 border border-rose-100 text-rose-800 text-xs flex items-start gap-2.5">
-                <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
-                <span>{errorMsg}</span>
-              </div>
-            )}
-
-            {/* Google Sign In Button */}
+          <div className="flex items-center gap-3" id="header-controls">
+            {/* Bilingual Toggle */}
             <button 
-              onClick={handleLogin}
-              disabled={isLoggingIn}
-              className="w-full py-3.5 px-5 bg-slate-900 hover:bg-slate-800 text-white rounded-xl font-semibold shadow-md hover:shadow-lg transition-all duration-200 flex items-center justify-center gap-3 disabled:opacity-50"
+              onClick={() => setLang(lang === 'nl' ? 'en' : 'nl')}
+              className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-semibold text-slate-700 bg-slate-100 hover:bg-slate-200 rounded-lg transition"
+              id="header-lang-btn"
             >
-              {isLoggingIn ? (
-                <Loader2 className="w-5 h-5 animate-spin" />
-              ) : (
-                <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24">
-                  <path fill="currentColor" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
-                  <path fill="currentColor" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
-                  <path fill="currentColor" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l3.66-2.85z" />
-                  <path fill="currentColor" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.85c.87-2.6 3.3-4.53 6.16-4.53z" />
-                </svg>
-              )}
-              <span>{isLoggingIn ? t.signingIn : t.signIn}</span>
+              <Languages size={14} id="header-lang-icon" />
+              <span>{lang.toUpperCase()}</span>
             </button>
-            
-            <p className="mt-4 text-xs text-slate-400 text-center max-w-[280px]">
-              {t.permissionWarning}
-            </p>
-          </div>
 
-          <div className="border-t border-slate-100 pt-6 text-center z-10">
-            <span className="text-[11px] font-semibold text-slate-400 tracking-wider uppercase">
-              {t.secureCloud}
-            </span>
+            {/* Profile widget */}
+            <div className="flex items-center gap-2 border-l border-slate-200 pl-3" id="user-profile-widget">
+              {user.photoURL ? (
+                <img src={user.photoURL} alt={user.displayName || 'Profile'} className="h-8 w-8 rounded-full border border-slate-200" id="user-avatar" />
+              ) : (
+                <div className="h-8 w-8 rounded-full bg-indigo-100 text-indigo-700 font-bold flex items-center justify-center text-xs" id="user-avatar-placeholder">
+                  {(user.displayName || user.email || 'U').charAt(0).toUpperCase()}
+                </div>
+              )}
+              <span className="text-xs font-medium text-slate-700 hidden md:block" id="user-display-name">
+                {user.displayName || user.email}
+              </span>
+              <button
+                onClick={handleLogout}
+                className="p-1.5 text-slate-400 hover:text-slate-600 rounded-lg transition"
+                title={t.signOut}
+                id="sign-out-btn"
+              >
+                <LogOut size={16} id="sign-out-icon" />
+              </button>
+            </div>
           </div>
         </div>
-      ) : (
-        /* MAIN APPLICATION VIEW - Optimized for mobile width */
-        <div className="w-full max-w-md min-h-screen bg-slate-50 flex flex-col shadow-xl">
-          
-          {/* Header */}
-          <header className="bg-white border-b border-slate-100 px-5 py-4 flex items-center justify-between sticky top-0 z-30">
-            <div className="flex items-center gap-3">
-              {user?.photoURL ? (
-                <img 
-                  src={user.photoURL} 
-                  alt={user.displayName || 'Profile'} 
-                  referrerPolicy="no-referrer"
-                  className="w-9 h-9 rounded-full ring-2 ring-emerald-500/20 object-cover"
-                />
-              ) : (
-                <div className="w-9 h-9 rounded-full bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold text-sm">
-                  {user?.displayName?.charAt(0) || 'U'}
-                </div>
-              )}
-              <div className="flex flex-col min-w-0">
-                <span className="font-bold text-slate-900 text-sm leading-tight truncate max-w-[130px]">
-                  {user?.displayName || 'My Account'}
-                </span>
-                <span className="text-[10px] text-slate-400 font-medium flex items-center gap-1">
-                  <Database className="w-2.5 h-2.5 text-emerald-500 shrink-0" />
-                  {t.activeDatabase}
-                </span>
-              </div>
-            </div>
+      </header>
 
-            <div className="flex items-center gap-1.5">
-              {/* Language Selector Pill */}
-              <div className="flex bg-slate-100 p-0.5 rounded-lg border border-slate-200/50 mr-1">
-                <button
-                  onClick={() => changeLanguage('en')}
-                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${
-                    appLang === 'en' 
-                      ? 'bg-white text-slate-900 shadow-xs' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  EN
-                </button>
-                <button
-                  onClick={() => changeLanguage('nl')}
-                  className={`px-2 py-1 text-[10px] font-bold rounded-md transition-all ${
-                    appLang === 'nl' 
-                      ? 'bg-white text-slate-900 shadow-xs' 
-                      : 'text-slate-400 hover:text-slate-600'
-                  }`}
-                >
-                  NL
-                </button>
-              </div>
-
-              <button 
-                onClick={handleLogout}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-lg hover:bg-slate-50 transition-colors"
-                title={t.signOut}
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
-            </div>
-          </header>
-
-          {/* Sheet database configuring banner */}
-          {isSettingUpDb && (
-            <div className="bg-emerald-50 border-b border-emerald-100 px-5 py-2.5 flex items-center gap-2.5 text-xs text-emerald-800 font-medium">
-              <Loader2 className="w-3.5 h-3.5 animate-spin text-emerald-600 shrink-0" />
-              <span>{t.initializingDb}</span>
-            </div>
-          )}
-
-          {/* Main List and Controls */}
-          <main className="flex-1 px-5 py-6 flex flex-col overflow-y-auto pb-24">
+      {/* Main Container */}
+      <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 grid grid-cols-1 lg:grid-cols-12 gap-6" id="app-main">
+        {/* Left Side: Recording Console */}
+        <div className="lg:col-span-5 space-y-6" id="recorder-panel">
+          {/* Recorder Console Card */}
+          <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-6 relative overflow-hidden" id="recorder-console">
             
-            {/* Quick Action: Create New Summary */}
-            <div className="mb-6">
-              <button 
-                onClick={openNewSummaryModal}
-                disabled={isSettingUpDb}
-                className="w-full py-3 px-4 bg-emerald-500 hover:bg-emerald-600 disabled:bg-emerald-300 text-white rounded-xl font-semibold shadow-md shadow-emerald-500/10 hover:shadow-lg hover:shadow-emerald-500/15 transition-all duration-200 flex items-center justify-center gap-2.5 text-sm"
-              >
-                <Plus className="w-4 h-4 text-white" />
-                <Mic className="w-4 h-4 text-white" />
-                <span>{t.createNewSummary}</span>
-              </button>
-            </div>
+            {/* Processing Overlay */}
+            {isProcessing && (
+              <div className="absolute inset-0 bg-white/95 backdrop-blur-xs flex flex-col items-center justify-center p-6 z-10 text-center" id="processing-overlay">
+                <div className="relative mb-6" id="processing-visual">
+                  <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-indigo-600" id="processing-spinner"></div>
+                  <Sparkles className="absolute inset-0 m-auto text-indigo-500 animate-pulse" size={24} id="processing-star-icon" />
+                </div>
+                <h3 className="font-bold text-slate-900 text-lg" id="processing-title">{t.processing}</h3>
+                <p className="text-sm text-slate-500 mt-2 font-medium" id="processing-step">{processingStep}</p>
+                <p className="text-xs text-slate-400 mt-1 max-w-xs" id="processing-sub">
+                  {lang === 'nl' ? 'Gemini AI is bezig met transcriberen en samenvatten van de audio.' : 'Gemini AI is actively transcribing and summarizing the audio.'}
+                </p>
+              </div>
+            )}
 
-            {/* Search filter bar */}
-            <div className="relative mb-6">
-              <Search className="w-4.5 h-4.5 text-slate-400 absolute left-3.5 top-3.5" />
-              <input 
-                type="text" 
-                placeholder={t.searchPlaceholder}
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-200 focus:border-emerald-500 focus:outline-none rounded-xl text-sm placeholder:text-slate-400 text-slate-800 transition-colors shadow-sm"
-              />
-              {searchQuery && (
-                <button 
-                  onClick={() => setSearchQuery('')}
-                  className="p-1.5 absolute right-2.5 top-2.5 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {/* Header of dynamic list */}
-            <div className="flex items-center justify-between mb-3 px-1">
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">
-                {activeTab === 'recordings' ? t.activeConversations : t.archivedFolders} ({filteredRecordings.length})
+            <div className="flex items-center justify-between border-b border-slate-100 pb-4 mb-5" id="recorder-header">
+              <h2 className="font-bold text-slate-900 flex items-center gap-2 text-md" id="recorder-title">
+                <span className="p-1.5 bg-indigo-50 text-indigo-600 rounded-lg" id="recorder-icon-container"><Mic size={16} id="header-mic-icon" /></span>
+                {t.newRecording}
               </h2>
-              {recordings.length > 0 && !isLoadingRecordings && (
-                <button 
-                  onClick={() => setupDatabase(token!)}
-                  className="text-[11px] font-semibold text-emerald-600 hover:text-emerald-700 bg-emerald-50 hover:bg-emerald-100 px-2 py-1 rounded"
-                >
-                  {t.refresh}
-                </button>
+              {isRecording && (
+                <span className="flex items-center gap-1.5 text-xs text-rose-600 font-semibold bg-rose-50 px-2.5 py-1 rounded-full animate-pulse" id="record-status-badge">
+                  <span className="h-2 w-2 rounded-full bg-rose-600" id="record-dot"></span>
+                  {isPaused ? t.recordingPaused : t.recordingActive}
+                </span>
               )}
             </div>
 
-            {/* Recordings List */}
-            <div className="flex-1 flex flex-col gap-3">
-              {isLoadingRecordings ? (
-                <div className="flex flex-col items-center justify-center py-16 gap-3">
-                  <Loader2 className="w-8 h-8 text-emerald-500 animate-spin" />
-                  <span className="text-xs font-medium text-slate-500">{t.loadingSpreadsheet}</span>
-                </div>
-              ) : filteredRecordings.length === 0 ? (
-                <div className="bg-white border border-slate-100 rounded-2xl p-8 text-center flex flex-col items-center justify-center shadow-sm">
-                  <div className="w-12 h-12 rounded-xl bg-slate-50 flex items-center justify-center mb-4">
-                    {activeTab === 'recordings' ? (
-                      <FileText className="w-6 h-6 text-slate-400" />
-                    ) : (
-                      <Archive className="w-6 h-6 text-slate-400" />
-                    )}
-                  </div>
-                  <h3 className="text-sm font-bold text-slate-800 mb-1">
-                    {searchQuery ? t.noMatches : activeTab === 'recordings' ? t.noSummaries : t.archiveEmpty}
-                  </h3>
-                  <p className="text-xs text-slate-400 leading-relaxed max-w-[200px]">
-                    {searchQuery 
-                      ? t.noMatchesSub 
-                      : activeTab === 'recordings' 
-                      ? t.noSummariesSub 
-                      : t.archiveEmptySub}
-                  </p>
-                </div>
-              ) : (
-                filteredRecordings.map((recording) => (
-                  <motion.div
-                    key={recording.id}
-                    layoutId={`card-${recording.id}`}
-                    onClick={() => setSelectedRecording(recording)}
-                    className="bg-white hover:bg-slate-50/50 border border-slate-100 hover:border-slate-200 rounded-2xl p-4 cursor-pointer transition-all duration-200 shadow-sm flex flex-col gap-3 relative group"
-                  >
-                    <div className="flex items-start justify-between gap-2.5">
-                      <div className="flex flex-col gap-1.5 flex-1 min-w-0">
-                        <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400">
-                          <span className="flex items-center gap-1">
-                            <Calendar className="w-3 h-3" />
-                            {recording.date}
-                          </span>
-                          <span>•</span>
-                          <span className="truncate max-w-[120px]">ID: {recording.id}</span>
-                        </div>
-                        <h3 className="text-sm font-bold text-slate-900 leading-snug truncate">
-                          {recording.shortTitle}
-                        </h3>
-                      </div>
+            <div className="space-y-4" id="recorder-inputs">
+              {/* Title Input */}
+              <div id="input-title-group">
+                <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5" id="title-label">
+                  {lang === 'nl' ? 'Titel' : 'Title'}
+                </label>
+                <input
+                  type="text"
+                  value={recordingTitle}
+                  onChange={(e) => setRecordingTitle(e.target.value)}
+                  placeholder={t.recordTitlePlaceholder}
+                  disabled={isRecording}
+                  className="w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:border-indigo-500 transition text-sm"
+                  id="recording-title-input"
+                />
+              </div>
 
-                      {/* Action buttons with custom mobile size */}
-                      <div className="flex items-center gap-1.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-                        {activeTab === 'recordings' ? (
+              {/* Category & Tag */}
+              <div className="grid grid-cols-2 gap-4" id="input-meta-grid">
+                <div id="input-category-group">
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5" id="category-label">
+                    {t.category}
+                  </label>
+                  <select
+                    value={recordingCategory}
+                    onChange={(e) => setRecordingCategory(e.target.value)}
+                    disabled={isRecording}
+                    className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 focus:bg-white focus:outline-hidden focus:border-indigo-500 transition text-xs font-medium"
+                    id="recording-category-select"
+                  >
+                    {Object.entries(CATEGORIES).map(([key, config]) => (
+                      <option key={key} value={key} id={`category-opt-${key}`}>
+                        {lang === 'nl' ? config.nl : config.en}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div id="input-duration-group">
+                  <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5" id="duration-label">
+                    {t.duration}
+                  </label>
+                  <div className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 font-mono text-xs flex items-center justify-center border-dashed font-bold" id="recording-timer-display">
+                    <Clock size={14} className="mr-1.5 text-slate-400" id="timer-icon" />
+                    <span>{formatTime(recordingDuration)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Waveform Visualizer Canvas */}
+              <div className="h-32 bg-slate-50 border border-slate-100 rounded-2xl flex items-center justify-center overflow-hidden relative" id="visualizer-container">
+                <canvas 
+                  ref={canvasRef} 
+                  className="w-full h-full" 
+                  width={300} 
+                  height={128}
+                  id="audio-level-canvas"
+                />
+                {!isRecording && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-slate-300 text-xs gap-1" id="visualizer-placeholder">
+                    <Volume2 size={24} className="opacity-40" id="waveform-placeholder-icon" />
+                    <span>{lang === 'nl' ? 'Druk op start om op te nemen' : 'Press start to record'}</span>
+                  </div>
+                )}
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex gap-3 pt-2" id="recorder-buttons-group">
+                {!isRecording ? (
+                  <button
+                    onClick={startRecording}
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-xl hover:bg-indigo-700 shadow-md shadow-indigo-100 active:scale-[0.98] transition"
+                    id="start-recording-btn"
+                  >
+                    <Mic size={18} id="start-mic-icon" />
+                    <span>{t.startRecord}</span>
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      onClick={togglePause}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 border border-slate-200 bg-white text-slate-700 font-semibold rounded-xl hover:bg-slate-50 active:scale-[0.98] transition"
+                      id="pause-recording-btn"
+                    >
+                      {isPaused ? <Play size={16} id="resume-icon" /> : <Pause size={16} id="pause-icon" />}
+                      <span>{isPaused ? t.resumeRecord : t.pauseRecord}</span>
+                    </button>
+                    <button
+                      onClick={stopRecording}
+                      className="flex-1 flex items-center justify-center gap-2 px-4 py-3 bg-rose-600 text-white font-semibold rounded-xl hover:bg-rose-700 shadow-md shadow-rose-100 active:scale-[0.98] transition"
+                      id="stop-recording-btn"
+                    >
+                      <Square size={16} id="stop-icon" />
+                      <span>{t.stopRecord}</span>
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Right Side: Saved Transcripts & Summaries list or details view */}
+        <div className="lg:col-span-7 space-y-6" id="dashboard-panel">
+          {selectedRecording ? (
+            /* Details View of Selected Recording */
+            <div className="bg-white border border-slate-200 rounded-2xl shadow-xs p-6 space-y-6" id="recording-details-view">
+              
+              {/* Back & Actions header */}
+              <div className="flex items-center justify-between border-b border-slate-100 pb-4" id="details-header">
+                <button
+                  onClick={() => setSelectedRecording(null)}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200/80 rounded-lg transition"
+                  id="details-back-btn"
+                >
+                  &larr; {t.backToList}
+                </button>
+
+                <button
+                  onClick={() => handleDelete(selectedRecording.id)}
+                  className="p-1.5 text-slate-400 hover:text-rose-600 rounded-lg transition"
+                  title={t.deleteRecording}
+                  id="details-delete-btn"
+                >
+                  <Trash2 size={16} id="details-delete-icon" />
+                </button>
+              </div>
+
+              {/* Title & Metadata */}
+              <div className="space-y-2.5" id="details-metadata">
+                <div className="flex flex-wrap items-center gap-2" id="details-categories-row">
+                  <span className={`px-2.5 py-0.5 border text-[10px] font-bold uppercase tracking-wider rounded-md ${CATEGORIES[selectedRecording.category]?.color || CATEGORIES.other.color}`} id="details-category-badge">
+                    {lang === 'nl' ? CATEGORIES[selectedRecording.category]?.nl : CATEGORIES[selectedRecording.category]?.en}
+                  </span>
+                </div>
+                <h2 className="text-2xl font-extrabold text-slate-900 leading-tight" id="details-recording-title">
+                  {selectedRecording.title}
+                </h2>
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-slate-400" id="details-info-row">
+                  <span className="flex items-center gap-1" id="details-date">
+                    <Calendar size={13} id="details-date-icon" />
+                    <span>{t.createdAtLabel}: {new Date(selectedRecording.createdAt).toLocaleString(lang === 'nl' ? 'nl-NL' : 'en-US')}</span>
+                  </span>
+                  <span className="flex items-center gap-1" id="details-duration">
+                    <Clock size={13} id="details-duration-icon" />
+                    <span>{t.duration}: {formatTime(selectedRecording.duration)}</span>
+                  </span>
+                </div>
+              </div>
+
+              {/* BENTO GRID: Transcription & Summary side-by-side or stacked */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6" id="bento-container">
+                {/* Transcript Card */}
+                <div className="bg-slate-50/50 border border-slate-200/60 rounded-2xl p-5 flex flex-col justify-between space-y-4" id="transcript-bento-card">
+                  <div className="space-y-2" id="transcript-card-header">
+                    <div className="flex items-center justify-between" id="transcript-header-row">
+                      <h3 className="font-bold text-slate-900 text-sm flex items-center gap-2" id="transcript-title">
+                        <span className="h-2 w-2 rounded-full bg-slate-400" id="transcript-dot"></span>
+                        {t.transcriptTab}
+                      </h3>
+                      <button
+                        onClick={() => handleCopy(selectedRecording.transcript, 'transcript')}
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md px-2.5 py-1.5 transition uppercase tracking-wider"
+                        id="copy-transcript-btn"
+                      >
+                        {copiedField === 'transcript' ? (
                           <>
-                            <button
-                              onClick={() => handleReopenRecording(recording)}
-                              className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 rounded-lg transition-colors border border-transparent hover:border-emerald-100"
-                              title={t.reopenAndRecord}
-                            >
-                              <Edit3 className="w-4 h-4" />
-                            </button>
-                            <button
-                              onClick={(e) => handleArchiveRecording(e, recording)}
-                              className="p-2 text-slate-400 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors border border-transparent hover:border-amber-100"
-                              title={appLang === 'nl' ? 'Archiveren' : 'Archive'}
-                            >
-                              <Archive className="w-4 h-4" />
-                            </button>
+                            <Check size={11} id="check-icon-1" />
+                            <span>{t.copied}</span>
                           </>
                         ) : (
-                          <button
-                            onClick={(e) => handleDeleteArchived(e, recording.id, recording.shortTitle)}
-                            className="p-2 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors border border-transparent hover:border-rose-100"
-                            title={appLang === 'nl' ? 'Verwijderen' : 'Remove'}
-                          >
-                            <Trash2 className="w-4 h-4" />
-                          </button>
+                          <>
+                            <Copy size={11} id="copy-icon-1" />
+                            <span>{lang === 'nl' ? 'Kopieer' : 'Copy'}</span>
+                          </>
                         )}
-                      </div>
+                      </button>
                     </div>
-
-                    <p className="text-xs text-slate-500 leading-relaxed line-clamp-2">
-                      {recording.description}
+                    <p className="text-slate-600 text-xs leading-relaxed whitespace-pre-wrap max-h-96 overflow-y-auto pr-1" id="transcript-body-text">
+                      {selectedRecording.transcript}
                     </p>
+                  </div>
+                </div>
 
-                    <div className="border-t border-slate-100/80 pt-2.5 flex items-center justify-between mt-0.5 text-[10px] font-medium text-slate-400">
-                      <div className="flex items-center gap-1.5 min-w-0 flex-1">
-                        <Mail className="w-3 h-3 text-slate-400 shrink-0" />
-                        <span className="truncate pr-2">{appLang === 'nl' ? 'Onderwerp' : 'Subject'}: {recording.emailSubject}</span>
-                      </div>
-                      <ChevronRight className="w-3.5 h-3.5 text-slate-300 shrink-0 group-hover:translate-x-0.5 transition-transform" />
+                {/* AI Summary Card */}
+                <div className="bg-gradient-to-br from-indigo-50/20 via-purple-50/20 to-white border border-indigo-100 rounded-2xl p-5 flex flex-col justify-between space-y-4" id="summary-bento-card">
+                  <div className="space-y-2" id="summary-card-header">
+                    <div className="flex items-center justify-between" id="summary-header-row">
+                      <h3 className="font-bold text-indigo-950 text-sm flex items-center gap-1.5" id="summary-title">
+                        <Sparkles size={14} className="text-indigo-600" id="summary-sparkle-icon" />
+                        {t.summaryTab}
+                      </h3>
+                      <button
+                        onClick={() => handleCopy(selectedRecording.summary, 'summary')}
+                        className="inline-flex items-center gap-1 text-[10px] font-bold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-md px-2.5 py-1.5 transition uppercase tracking-wider"
+                        id="copy-summary-btn"
+                      >
+                        {copiedField === 'summary' ? (
+                          <>
+                            <Check size={11} id="check-icon-2" />
+                            <span>{t.copied}</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy size={11} id="copy-icon-2" />
+                            <span>{lang === 'nl' ? 'Kopieer' : 'Copy'}</span>
+                          </>
+                        )}
+                      </button>
                     </div>
-                  </motion.div>
-                ))
-              )}
+                    <div className="text-slate-700 text-xs leading-relaxed max-h-96 overflow-y-auto pr-1" id="summary-body-container">
+                      {selectedRecording.summary.split('\n').map((line, idx) => {
+                        const trimmed = line.trim();
+                        if (trimmed.startsWith('-') || trimmed.startsWith('*')) {
+                          return (
+                            <div key={idx} className="flex items-start gap-2 my-1" id={`summary-bullet-${idx}`}>
+                              <span className="text-indigo-500 mt-1 shrink-0">•</span>
+                              <span>{trimmed.substring(1).trim()}</span>
+                            </div>
+                          );
+                        }
+                        return <p key={idx} className="my-1" id={`summary-text-${idx}`}>{line}</p>;
+                      })}
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-          </main>
-
-          {/* BOTTOM NAVIGATION BAR */}
-          <nav className="bg-white border-t border-slate-100 flex items-center justify-around py-3 px-6 fixed bottom-0 left-0 right-0 max-w-md mx-auto z-30">
-            <button
-              onClick={() => { setActiveTab('recordings'); setSearchQuery(''); }}
-              className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all duration-200 ${
-                activeTab === 'recordings' ? 'text-emerald-600 font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
-              }`}
-            >
-              <FileText className="w-5 h-5" />
-              <span className="text-[10px]">{appLang === 'nl' ? 'Opnamen' : 'Recordings'}</span>
-            </button>
-
-            <button
-              onClick={() => { setActiveTab('archive'); setSearchQuery(''); }}
-              className={`flex flex-col items-center gap-1 py-1 px-4 rounded-xl transition-all duration-200 ${
-                activeTab === 'archive' ? 'text-emerald-600 font-bold' : 'text-slate-400 hover:text-slate-600 font-medium'
-              }`}
-            >
-              <Archive className="w-5 h-5" />
-              <span className="text-[10px]">{appLang === 'nl' ? 'Archief' : 'Archive'}</span>
-            </button>
-          </nav>
-
-          {/* RECORDING / DICTATION MODAL */}
-          <AnimatePresence>
-            {isRecordingModalOpen && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-end justify-center z-50 p-4"
-              >
-                <motion.div 
-                  initial={{ y: '100%' }}
-                  animate={{ y: 0 }}
-                  exit={{ y: '100%' }}
-                  transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-                  className="bg-white w-full max-w-md rounded-t-3xl shadow-2xl flex flex-col overflow-hidden max-h-[90vh]"
-                >
-                  {/* Modal Header */}
-                  <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className={`w-2.5 h-2.5 rounded-full ${isRecordingActive ? 'bg-emerald-500 animate-pulse' : 'bg-slate-300'}`} />
-                      <span className="font-bold text-slate-900 text-sm">
-                        {isRecordingActive ? t.recordingActive : t.recordingPaused}
-                      </span>
-                    </div>
-                    <button 
-                      onClick={() => {
-                        setIsRecordingActive(false);
-                        setIsRecordingModalOpen(false);
-                      }}
-                      disabled={isSavingRecord}
-                      className="p-1.5 hover:bg-slate-50 text-slate-400 hover:text-slate-600 rounded-full transition-colors disabled:opacity-30"
-                    >
-                      <X className="w-5 h-5" />
-                    </button>
-                  </div>
-
-                  {/* Dictation Box */}
-                  <div className="flex-1 p-5 overflow-y-auto min-h-[180px] max-h-[300px] bg-slate-50/50 flex flex-col">
-                    <div className="flex-1 flex flex-col justify-start">
-                      {fullText || interimText ? (
-                        <div className="text-slate-800 text-sm leading-relaxed space-y-2 whitespace-pre-wrap font-medium">
-                          <span>{fullText}</span>
-                          {interimText && (
-                            <span className="text-emerald-600 bg-emerald-50 px-1 rounded transition-colors border-b border-emerald-300">
-                              {interimText}
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex-1 flex flex-col items-center justify-center text-center py-12 text-slate-400">
-                          <Mic className="w-8 h-8 text-slate-300 mb-2.5 animate-bounce" />
-                          <p className="text-xs font-semibold">{t.speakInstruction}</p>
-                          <p className="text-[10px] text-slate-400 max-w-[200px] mt-1 leading-normal">
-                            {t.typeInstruction}
-                          </p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Typing fallback input block (helps with testing & iframe restrictions) */}
-                  <div className="px-5 py-3 border-t border-slate-100 bg-white">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                      {t.manualLabel}
-                    </label>
-                    <textarea
-                      value={fullText}
-                      onChange={(e) => setFullText(e.target.value)}
-                      placeholder={t.manualPlaceholder}
-                      className="w-full h-16 p-2 text-xs border border-slate-200 focus:border-emerald-500 rounded-lg focus:outline-none resize-none"
+          ) : (
+            /* Records List View */
+            <div className="bg-white border border-slate-200 rounded-2xl p-6 space-y-6 shadow-xs" id="recordings-list-view">
+              
+              {/* Filtering & Searching Row */}
+              <div className="space-y-4" id="list-controls">
+                <div className="flex flex-col md:flex-row gap-3" id="filters-container">
+                  {/* Search bar */}
+                  <div className="relative flex-1" id="search-input-group">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" size={16} id="search-icon" />
+                    <input
+                      type="text"
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      placeholder={t.searchPlaceholder}
+                      className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-hidden focus:border-indigo-500 transition text-xs font-medium"
+                      id="search-input"
                     />
                   </div>
 
-                  {/* Recording control panel */}
-                  <div className="p-5 border-t border-slate-100 bg-slate-50/20 flex flex-col items-center gap-4">
-                    {/* Pulsing soundwave visualization when speaking */}
-                    {isRecordingActive && (
-                      <div className="flex items-center gap-1.5 h-6">
-                        {[0, 1, 2, 3, 4, 5, 6].map((i) => (
-                          <motion.div
-                            key={i}
-                            animate={{ height: [4, 16, 4] }}
-                            transition={{
-                              duration: 0.8,
-                              repeat: Infinity,
-                              delay: i * 0.1,
-                            }}
-                            className="w-1 bg-emerald-500 rounded-full"
-                          />
-                        ))}
-                      </div>
-                    )}
-
-                    <div className="flex items-center justify-center gap-4 w-full">
-                      {/* Play/Pause Record Button - Perfect size optimized for mobile tap */}
-                      <button
-                        onClick={handleToggleRecording}
-                        disabled={isSavingRecord}
-                        className={`w-12 h-12 rounded-full flex items-center justify-center transition-all duration-200 ${
-                          isRecordingActive 
-                            ? 'bg-rose-500 hover:bg-rose-600 text-white shadow-md shadow-rose-500/10' 
-                            : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-md shadow-emerald-500/10'
-                        }`}
-                        title={isRecordingActive ? (appLang === 'nl' ? 'Dicteren pauzeren' : 'Pause Dictation') : (appLang === 'nl' ? 'Hervatten' : 'Resume Dictation')}
-                      >
-                        {isRecordingActive ? (
-                          <Pause className="w-5 h-5 text-white fill-current" />
-                        ) : (
-                          <Play className="w-5 h-5 text-white fill-current ml-0.5" />
-                        )}
-                      </button>
-
-                      {/* Save summaries to Sheets & Gmail button */}
-                      <button
-                        onClick={handleSaveRecording}
-                        disabled={isSavingRecord || (!fullText.trim() && !interimText.trim())}
-                        className="flex-1 py-3 px-5 bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 text-white disabled:text-slate-400 rounded-xl font-semibold shadow-md transition-all duration-200 flex items-center justify-center gap-2 text-sm disabled:shadow-none"
-                      >
-                        {isSavingRecord ? (
-                          <>
-                            <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                            <span>{updatingRecording ? t.updating : t.summarizing}</span>
-                          </>
-                        ) : (
-                          <>
-                            <Save className="w-4 h-4" />
-                            <span>{updatingRecording ? t.updateRecording : t.saveAndEmail}</span>
-                          </>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* DETAILED SUMMARY VIEW MODAL */}
-          <AnimatePresence>
-            {selectedRecording && (
-              <motion.div 
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                exit={{ opacity: 0 }}
-                className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs flex items-end justify-center z-50 p-4"
-              >
-                <motion.div 
-                  initial={{ y: '100%' }}
-                  animate={{ y: 0 }}
-                  exit={{ y: '100%' }}
-                  transition={{ type: 'spring', damping: 25, stiffness: 220 }}
-                  className="bg-white w-full max-w-md rounded-t-3xl shadow-2xl flex flex-col overflow-hidden max-h-[92vh]"
-                >
-                  {/* Detailed Modal Header */}
-                  <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between sticky top-0 bg-white z-10">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        {t.convoDetails}
-                      </span>
-                      <span className="text-xs text-slate-400 font-medium flex items-center gap-1.5 mt-0.5">
-                        <Calendar className="w-3 h-3 text-slate-400" />
-                        {selectedRecording.date}
-                      </span>
-                    </div>
-                    <button 
-                      onClick={() => setSelectedRecording(null)}
-                      className="p-1.5 hover:bg-slate-50 text-slate-400 hover:text-slate-600 rounded-full transition-colors"
+                  {/* Category Filter */}
+                  <div className="flex flex-wrap gap-1.5" id="category-filter-chips">
+                    <button
+                      onClick={() => setSelectedCategory('all')}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${selectedCategory === 'all' ? 'bg-slate-900 border-slate-900 text-white shadow-xs' : 'bg-slate-100 border-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                      id="filter-chip-all"
                     >
-                      <X className="w-5 h-5" />
+                      {lang === 'nl' ? 'Alles' : 'All'}
                     </button>
-                  </div>
-
-                  {/* Summary Contents */}
-                  <div className="flex-1 overflow-y-auto px-5 py-6 space-y-6">
-                    {/* Header Details */}
-                    <div>
-                      <h2 className="text-base font-extrabold text-slate-900 leading-snug">
-                        {selectedRecording.shortTitle}
-                      </h2>
-                      <p className="text-xs text-slate-500 italic mt-1.5 leading-relaxed bg-slate-50 border-l-2 border-emerald-400 pl-3 py-1">
-                        {selectedRecording.description}
-                      </p>
-                    </div>
-
-                    {/* Email delivery details */}
-                    <div className="p-3.5 bg-slate-50 border border-slate-100 rounded-xl flex flex-col gap-1.5">
-                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                        <Mail className="w-3.5 h-3.5 text-emerald-500" />
-                        <span>{t.emailConfirmHeader}</span>
-                      </div>
-                      <div className="text-xs text-slate-600 font-medium">
-                        <span className="text-slate-400">{t.recipient}: </span>
-                        ikbennietchristophe@gmail.com
-                      </div>
-                      <div className="text-xs text-slate-600 font-medium truncate">
-                        <span className="text-slate-400">{t.subjectLine}: </span>
-                        {selectedRecording.emailSubject}
-                      </div>
-                    </div>
-
-                    {/* AI Structured Summary */}
-                    <div>
-                      <h3 className="text-[11px] font-extrabold text-emerald-600 uppercase tracking-widest block mb-2.5">
-                        {t.aiSummary}
-                      </h3>
-                      <div className="prose prose-slate prose-sm max-w-none text-slate-700 leading-relaxed text-sm bg-emerald-50/20 border border-emerald-100/50 p-4 rounded-2xl">
-                        <ReactMarkdown>{selectedRecording.structuredSummary}</ReactMarkdown>
-                      </div>
-                    </div>
-
-                    {/* Original Transcription */}
-                    <div>
-                      <h3 className="text-[11px] font-extrabold text-slate-400 uppercase tracking-widest block mb-2">
-                        {t.originalSpeech}
-                      </h3>
-                      <div className="p-4 bg-slate-50/50 border border-slate-100 rounded-xl max-h-40 overflow-y-auto text-xs text-slate-600 leading-relaxed whitespace-pre-wrap">
-                        {selectedRecording.fullText}
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Actions Bar inside detailed summary */}
-                  <div className="p-5 border-t border-slate-100 bg-slate-50/30 flex flex-col gap-2">
-                    <div className="flex gap-2">
-                      <button 
-                        onClick={() => setSelectedRecording(null)}
-                        className="flex-1 py-2.5 text-slate-500 hover:text-slate-700 bg-slate-100 hover:bg-slate-200/80 rounded-xl text-xs font-semibold transition-colors"
+                    {Object.entries(CATEGORIES).map(([key, config]) => (
+                      <button
+                        key={key}
+                        onClick={() => setSelectedCategory(key)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition ${selectedCategory === key ? 'bg-indigo-600 border-indigo-600 text-white shadow-xs' : 'bg-slate-100 border-slate-100 text-slate-600 hover:bg-slate-200'}`}
+                        id={`filter-chip-${key}`}
                       >
-                        {t.closeSummary}
+                        {lang === 'nl' ? config.nl : config.en}
                       </button>
-                      {selectedRecording.status === 'Active' && (
-                        <button 
-                          onClick={() => {
-                            handleReopenRecording(selectedRecording);
-                            setSelectedRecording(null);
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              {/* Saved Records list */}
+              <div className="space-y-3 max-h-[480px] overflow-y-auto pr-1" id="recordings-scroller">
+                {filteredRecordings.length > 0 ? (
+                  filteredRecordings.map((rec) => (
+                    <div
+                      key={rec.id}
+                      onClick={() => setSelectedRecording(rec)}
+                      className="bg-slate-50/50 hover:bg-white border border-slate-200/60 hover:border-indigo-100 rounded-xl p-4 flex items-center justify-between gap-4 cursor-pointer hover:shadow-xs active:scale-[0.99] transition"
+                      id={`recording-row-${rec.id}`}
+                    >
+                      <div className="space-y-1 min-w-0" id={`recording-meta-${rec.id}`}>
+                        <div className="flex flex-wrap items-center gap-1.5" id={`recording-badge-row-${rec.id}`}>
+                          <span className={`px-2 py-0.5 text-[9px] font-bold uppercase tracking-wider rounded border ${CATEGORIES[rec.category]?.color || CATEGORIES.other.color}`} id={`recording-badge-${rec.id}`}>
+                            {lang === 'nl' ? CATEGORIES[rec.category]?.nl : CATEGORIES[rec.category]?.en}
+                          </span>
+                          <span className="text-[10px] text-slate-400" id={`recording-time-${rec.id}`}>{new Date(rec.createdAt).toLocaleDateString(lang === 'nl' ? 'nl-NL' : 'en-US')}</span>
+                        </div>
+                        <h4 className="font-bold text-slate-800 text-xs truncate" id={`recording-title-${rec.id}`}>
+                          {rec.title}
+                        </h4>
+                        <p className="text-[11px] text-slate-400 line-clamp-1" id={`recording-snippet-${rec.id}`}>
+                          {rec.summary || rec.transcript}
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0" id={`recording-actions-${rec.id}`}>
+                        <span className="inline-flex items-center gap-1 text-[10px] font-mono font-bold text-slate-500 bg-slate-100 px-2 py-1 rounded-md" id={`recording-duration-badge-${rec.id}`}>
+                          <Clock size={11} id={`duration-icon-${rec.id}`} />
+                          <span>{formatTime(rec.duration)}</span>
+                        </span>
+                        
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDelete(rec.id);
                           }}
-                          className="flex-1 py-2.5 text-emerald-700 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all"
+                          className="p-1.5 text-slate-300 hover:text-rose-600 rounded-lg transition"
+                          id={`recording-delete-btn-${rec.id}`}
                         >
-                          <Edit3 className="w-3.5 h-3.5" />
-                          <span>{t.reopenAndRecord}</span>
+                          <Trash2 size={13} id={`recording-delete-icon-${rec.id}`} />
                         </button>
-                      )}
+                      </div>
                     </div>
-                    {selectedRecording.status === 'Active' && (
-                      <button 
-                        onClick={(e) => {
-                          handleArchiveRecording(e, selectedRecording);
-                          setSelectedRecording(null);
-                        }}
-                        className="w-full py-2 bg-slate-700 hover:bg-slate-800 text-white rounded-xl text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm"
-                      >
-                        <Archive className="w-3.5 h-3.5" />
-                        <span>{t.archiveRecording}</span>
-                      </button>
-                    )}
+                  ))
+                ) : (
+                  <div className="text-center py-12 px-6 bg-slate-50 rounded-2xl border border-dashed border-slate-200 flex flex-col items-center justify-center text-slate-400 gap-2" id="empty-list-placeholder">
+                    <Volume2 size={32} className="opacity-40 animate-pulse" id="empty-icon" />
+                    <p className="text-xs font-semibold max-w-xs leading-normal" id="empty-text">
+                      {searchQuery ? t.noSearchResults : t.noRecordings}
+                    </p>
                   </div>
-                </motion.div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
+                )}
+              </div>
+            </div>
+          )}
         </div>
-      )}
+      </main>
+
+      <footer className="bg-white border-t border-slate-200 py-4 text-center text-xs text-slate-400" id="app-footer">
+        &copy; {new Date().getFullYear()} Voice Recording Summarizer — Powered by Gemini AI.
+      </footer>
     </div>
   );
 }

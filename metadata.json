@@ -1,6 +1,10 @@
 {
-  "name": "Speech to Text Summarizer",
-  "description": "A mobile-first application to record, transcribe, and summarize spoken text, saving summaries to Google Sheets and sending emails via Gmail.",
-  "requestFramePermissions": ["microphone"],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+  "name": "Voice Recording Summarizer",
+  "description": "Record audio, transcribe, and summarize your voice notes with Google Gemini and Firebase.",
+  "requestFramePermissions": [
+    "microphone"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
 }
