@@ -418,8 +418,28 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const errData = await response.json();
-        throw new Error(errData.error || 'Server processing failed');
+        let errorMessage = 'Server processing failed';
+        try {
+          const errText = await response.text();
+          try {
+            const errData = JSON.parse(errText);
+            errorMessage = errData.error || errorMessage;
+          } catch {
+            if (errText.includes('<title>') && errText.includes('</title>')) {
+              const match = errText.match(/<title>(.*?)<\/title>/);
+              if (match && match[1]) {
+                errorMessage = match[1];
+              } else {
+                errorMessage = `Server error (Status ${response.status})`;
+              }
+            } else {
+              errorMessage = errText.substring(0, 150).trim() || `Server error (Status ${response.status})`;
+            }
+          }
+        } catch {
+          errorMessage = `Server error (Status ${response.status})`;
+        }
+        throw new Error(errorMessage);
       }
 
       setProcessingStep(t.stepSummarize);

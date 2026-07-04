@@ -37,11 +37,17 @@ async function startServer() {
         return res.status(500).json({ error: language === 'nl' ? 'Gemini API-sleutel is niet geconfigureerd' : 'Gemini API key is not configured' });
       }
 
-      console.log(`Received audio summarization request. MIME: ${mimeType || 'audio/webm'}, Language: ${language}`);
+      // Clean mimeType: remove any codec parameters (e.g., 'audio/webm;codecs=opus' -> 'audio/webm')
+      let cleanMimeType = mimeType || 'audio/webm';
+      if (cleanMimeType.includes(';')) {
+        cleanMimeType = cleanMimeType.split(';')[0].trim();
+      }
+
+      console.log(`Received audio summarization request. Original MIME: ${mimeType || 'audio/webm'}, Clean MIME: ${cleanMimeType}, Language: ${language}`);
 
       const audioPart = {
         inlineData: {
-          mimeType: mimeType || 'audio/webm',
+          mimeType: cleanMimeType,
           data: audioBase64,
         },
       };
